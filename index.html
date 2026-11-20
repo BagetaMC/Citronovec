@@ -186,8 +186,9 @@ h1 span{display:block;color:var(--neon);margin-top:12px}
   border-radius:50%;background:#00ff4815;filter:blur(80px);
 }
 #skin{
-  position:relative;z-index:2;
+  position:relative;z-index:2;display:block;
   width:100%;height:540px;max-width:500px;
+  min-width:1px;min-height:1px;
 }
 .visual-label{
   position:absolute;bottom:20px;right:0;
@@ -928,7 +929,7 @@ footer strong{color:var(--neon)}
 
 <!-- 3D SKIN -->
 
-<script src="https://cdn.jsdelivr.net/npm/skinview3d@3.2.0/bundles/skinview3d.bundle.js"></script>
+
 
 <script>
 
@@ -1187,68 +1188,102 @@ document.addEventListener("click",event=>{
    3D MINECRAFT SKIN
 ================================= */
 
-async function createSkin(){
+function loadSkinView3D(){
+  if(window.skinview3d) return Promise.resolve(window.skinview3d);
 
-  const canvas=document.getElementById("skin");
+  const sources=[
+    "https://cdn.jsdelivr.net/npm/skinview3d@3.2.0/bundles/skinview3d.bundle.js",
+    "https://unpkg.com/skinview3d@3.2.0/bundles/skinview3d.bundle.js"
+  ];
 
-  if(!window.skinview3d){
-    console.error("SkinView3D se nepodařilo načíst.");
-    return;
-  }
+  return new Promise((resolve,reject)=>{
+    let index=0;
 
-  const viewer=new skinview3d.SkinViewer({
-    canvas:canvas,
-    width:500,
-    height:540,
-    skin:"skin.png"
-  });
+    function tryNext(){
+      if(window.skinview3d){
+        resolve(window.skinview3d);
+        return;
+      }
+      if(index>=sources.length){
+        reject(new Error("Knihovnu SkinView3D se nepodařilo načíst z žádného CDN."));
+        return;
+      }
 
-  viewer.fov=35;
-  viewer.zoom=.85;
-
-  viewer.camera.position.set(25,20,45);
-
-  viewer.controls.enableRotate=true;
-  viewer.controls.enableZoom=false;
-
-  viewer.animation=new skinview3d.IdleAnimation();
-
-  function resize(){
-
-    const mobile=window.innerWidth<=750;
-    const tablet=window.innerWidth>750 && window.innerWidth<=1050;
-
-    const width=Math.max(1,Math.round(canvas.clientWidth));
-    const height=Math.max(1,Math.round(canvas.clientHeight));
-
-    viewer.setSize(width,height);
-
-    if(mobile){
-      viewer.zoom=.72;
-    }else if(tablet){
-      viewer.zoom=.76;
-    }else if(window.innerWidth>=1441){
-      viewer.zoom=.95;
-    }else{
-      viewer.zoom=.85;
+      const script=document.createElement("script");
+      script.src=sources[index++];
+      script.async=true;
+      script.onload=()=>{
+        if(window.skinview3d) resolve(window.skinview3d);
+        else tryNext();
+      };
+      script.onerror=()=>tryNext();
+      document.head.appendChild(script);
     }
 
-  }
-
-  resize();
-
-  window.addEventListener("resize",resize);
-
-  if("ResizeObserver" in window){
-    const skinResizeObserver=new ResizeObserver(resize);
-    skinResizeObserver.observe(canvas);
-  }
-
+    tryNext();
+  });
 }
 
-createSkin().catch(error=>{
-  console.error("Chyba 3D skinu:",error);
-});
+async function createSkin(){
+  const canvas=document.getElementById("skin");
+  if(!canvas) return;
+
+  try{
+    const library=await loadSkinView3D();
+    const skinUrl=new URL("skin.png",document.baseURI).href;
+
+    const viewer=new library.SkinViewer({
+      canvas,
+      width:Math.max(1,Math.round(canvas.getBoundingClientRect().width)),
+      height:Math.max(1,Math.round(canvas.getBoundingClientRect().height)),
+      skin:null
+    });
+
+    viewer.fov=35;
+    viewer.camera.position.set(25,20,45);
+    viewer.controls.enableRotate=true;
+    viewer.controls.enableZoom=false;
+    viewer.animation=new library.IdleAnimation();
+
+    function resize(){
+      const rect=canvas.getBoundingClientRect();
+      const width=Math.max(1,Math.round(rect.width));
+      const height=Math.max(1,Math.round(rect.height));
+      viewer.setSize(width,height);
+
+      if(window.innerWidth<=750) viewer.zoom=.72;
+      else if(window.innerWidth<=1050) viewer.zoom=.76;
+      else if(window.innerWidth>=1441) viewer.zoom=.95;
+      else viewer.zoom=.85;
+    }
+
+    // Na mobilu může mít canvas při prvním spuštění nulovou výšku,
+    // dokud se nedokončí rozložení stránky a reveal animace.
+    requestAnimationFrame(()=>{
+      resize();
+      requestAnimationFrame(resize);
+    });
+
+    window.addEventListener("resize",resize,{passive:true});
+    window.addEventListener("orientationchange",()=>setTimeout(resize,250),{passive:true});
+
+    if("ResizeObserver" in window){
+      const observer=new ResizeObserver(resize);
+      observer.observe(canvas);
+      observer.observe(canvas.parentElement);
+    }
+
+    await viewer.loadSkin(skinUrl);
+    resize();
+    canvas.classList.add("skin-loaded");
+
+  }catch(error){
+    console.error("Chyba 3D skinu:",error);
+    canvas.setAttribute("aria-label","3D skin se nepodařilo načíst. Zkontroluj soubor skin.png a připojení k internetu.");
+  }
+}
+
+createSkin();
 
 
 /* =================================
